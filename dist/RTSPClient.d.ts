@@ -25,6 +25,7 @@ export default class RTSPClient extends EventEmitter {
     headers: {
         [key: string]: string;
     };
+    sdp: any;
     isConnected: boolean;
     _url?: string;
     _client?: net.Socket;

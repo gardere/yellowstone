@@ -10,9 +10,11 @@ function parseRTPPacket(buffer) {
     return {
         id: buffer.readUInt16BE(2),
         timestamp: buffer.readUInt32BE(4),
+        ssrc: buffer.readUInt32BE(8),
         marker,
         payload,
-        length
+        length,
+        buffer
     };
 }
 exports.parseRTPPacket = parseRTPPacket;

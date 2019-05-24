@@ -3,7 +3,9 @@ export interface RTPPacket {
     id: number;
     timestamp: number;
     marker: number;
+    ssrc: number;
     payload: Buffer;
+    buffer: Buffer;
     length: number;
 }
 export declare function parseRTPPacket(buffer: Buffer): RTPPacket;

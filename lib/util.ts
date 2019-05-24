@@ -5,8 +5,10 @@ export interface RTPPacket {
   id: number;
   timestamp: number;
   marker: number;
+  ssrc: number;
 
   payload: Buffer;
+  buffer: Buffer;
   length: number;
 }
 
@@ -21,9 +23,11 @@ export function parseRTPPacket(buffer: Buffer): RTPPacket {
   return {
     id: buffer.readUInt16BE(2),
     timestamp: buffer.readUInt32BE(4),
+    ssrc: buffer.readUInt32BE(8),
     marker,
     payload,
-    length
+    length,
+    buffer
   };
 }
 

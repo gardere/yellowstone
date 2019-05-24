@@ -20,6 +20,12 @@ var ReadStates;
     ReadStates[ReadStates["READING_RAW_PACKET"] = 4] = "READING_RAW_PACKET";
 })(ReadStates || (ReadStates = {}));
 ;
+let currentRtpPort = 27556;
+const getRtpPort = () => {
+    const port = currentRtpPort;
+    currentRtpPort += 2;
+    return port;
+};
 class RTSPClient extends events_1.EventEmitter {
     constructor(username, password, headers) {
         super();
@@ -96,12 +102,15 @@ class RTSPClient extends events_1.EventEmitter {
         }
         await this._netConnect(hostname, parseInt(port || "554"));
         await this.request("OPTIONS");
-        const describeRes = await this.request("DESCRIBE", { Accept: "application/sdp" });
+        const describeRes = await this.request("DESCRIBE", { Accept: "application/sdp" }, '');
         if (!describeRes || !describeRes.mediaHeaders) {
             throw new Error('No media headers on DESCRIBE; RTSP server is broken (sanity check)');
         }
         // For now, only RTP/AVP is supported.
-        const { media } = transform.parse(describeRes.mediaHeaders.join("\r\n"));
+        const sdp = transform.parse(describeRes.mediaHeaders.join("\r\n"));
+        const { media } = sdp;
+        this.sdp = sdp;
+        this.emit('sdp', sdp);
         // From parsed SDP.
         const mediaSource = media.find(source => source.type === "video" && source.protocol === RTP_AVP);
         if (!mediaSource || !mediaSource.rtp) {
@@ -117,7 +126,7 @@ class RTSPClient extends events_1.EventEmitter {
         if (connection === "udp") {
             // Create a pair of UDP listeners, even numbered port for RTP
             // and odd numbered port for RTCP
-            const rtpPort = 5000;
+            const rtpPort = getRtpPort();
             const rtpReceiver = dgram.createSocket("udp4");
             rtpReceiver.on("message", (buf, remote) => {
                 const packet = util_1.parseRTPPacket(buf);
@@ -136,7 +145,7 @@ class RTSPClient extends events_1.EventEmitter {
                 rtpReceiver.bind(rtpPort, () => resolve());
             });
             await new Promise(resolve => {
-                rtcpReceiver.bind(rtcpPort + 1, () => resolve());
+                rtcpReceiver.bind(rtcpPort, () => resolve());
             });
             setupRes = await this.request("SETUP", {
                 Transport: `RTP/AVP;unicast;client_port=${rtpPort}-${rtcpPort}`
@@ -158,8 +167,8 @@ class RTSPClient extends events_1.EventEmitter {
             throw new Error('No Transport header on SETUP; RTSP server is broken (sanity check)');
         }
         const transport = util_1.parseTransport(headers.Transport);
-        if (transport.protocol !== 'RTP/AVP/TCP' && transport.protocol !== 'RTP/AVP') {
-            throw new Error('Only RTSP servers supporting RTP/AVP(unicast) or RTP/ACP/TCP are supported at this time.');
+        if (transport.protocol !== 'RTP/AVP/TCP' && transport.protocol !== 'RTP/AVP' && transport.protocol !== 'RTP/AVP/UDP') {
+            throw new Error(`Only RTSP servers supporting RTP/AVP(unicast) or RTP/ACP/TCP are supported at this time. Advertised protocol: ${transport.protocol}`);
         }
         if (headers.Unsupported) {
             this._unsupportedExtensions = headers.Unsupported.split(",");
@@ -425,7 +434,12 @@ class RTSPClient extends events_1.EventEmitter {
             }
             else {
                 // unexpected data
-                throw new Error("Bug in RTSP data framing, please file an issue with the author with stacktrace.");
+                // console.error();
+                this.emit('error', 'unexpected data', data.toString());
+                this.close(true);
+                // throw new Error(
+                //   "Bug in RTSP data framing, please file an issue with the author with stacktrace."
+                // );
             }
         } // end while
     }

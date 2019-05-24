@@ -35,10 +35,19 @@ type Headers = {
   Unsupported?: string
 };
 
+
+let currentRtpPort = 27556;
+const getRtpPort = ():number => {
+  const port = currentRtpPort;
+  currentRtpPort += 2;
+  return port;
+}
+
 export default class RTSPClient extends EventEmitter {
   username: string;
   password: string;
   headers: { [key: string]: string };
+  sdp: any;
   
   isConnected: boolean = false;
 
@@ -151,13 +160,16 @@ export default class RTSPClient extends EventEmitter {
     await this._netConnect(hostname, parseInt(port || "554"));
     await this.request("OPTIONS");
 
-    const describeRes = await this.request("DESCRIBE", { Accept: "application/sdp" });
+    const describeRes = await this.request("DESCRIBE", { Accept: "application/sdp" }, '');
     if (!describeRes || !describeRes.mediaHeaders) {
       throw new Error('No media headers on DESCRIBE; RTSP server is broken (sanity check)');
     }
 
     // For now, only RTP/AVP is supported.
-    const {media} = transform.parse(describeRes.mediaHeaders.join("\r\n"));
+    const sdp = transform.parse(describeRes.mediaHeaders.join("\r\n"));
+    const {media} = sdp;
+    this.sdp = sdp;
+    this.emit('sdp', sdp);
 
     // From parsed SDP.
     const mediaSource = media.find(source => source.type === "video" && source.protocol === RTP_AVP);
@@ -180,7 +192,7 @@ export default class RTSPClient extends EventEmitter {
       // Create a pair of UDP listeners, even numbered port for RTP
       // and odd numbered port for RTCP
 
-      const rtpPort = 5000;
+      const rtpPort = getRtpPort();
       const rtpReceiver = dgram.createSocket("udp4");
 
       rtpReceiver.on("message", (buf, remote) => {
@@ -206,7 +218,7 @@ export default class RTSPClient extends EventEmitter {
       });
 
       await new Promise(resolve => {
-        rtcpReceiver.bind(rtcpPort + 1, () => resolve());
+        rtcpReceiver.bind(rtcpPort, () => resolve());
       });
 
       setupRes = await this.request("SETUP", {
@@ -235,9 +247,9 @@ export default class RTSPClient extends EventEmitter {
     }
 
     const transport = parseTransport(headers.Transport);
-    if (transport.protocol !== 'RTP/AVP/TCP' && transport.protocol !== 'RTP/AVP') {
+    if (transport.protocol !== 'RTP/AVP/TCP' && transport.protocol !== 'RTP/AVP' && transport.protocol !== 'RTP/AVP/UDP') {
       throw new Error(
-        'Only RTSP servers supporting RTP/AVP(unicast) or RTP/ACP/TCP are supported at this time.'
+        `Only RTSP servers supporting RTP/AVP(unicast) or RTP/ACP/TCP are supported at this time. Advertised protocol: ${transport.protocol}`
       );
     }
 
@@ -567,9 +579,12 @@ export default class RTSPClient extends EventEmitter {
         }
       } else {
         // unexpected data
-        throw new Error(
-          "Bug in RTSP data framing, please file an issue with the author with stacktrace."
-        );
+        // console.error();
+        this.emit('error', 'unexpected data', data.toString());
+        this.close(true);
+        // throw new Error(
+        //   "Bug in RTSP data framing, please file an issue with the author with stacktrace."
+        // );
       }
     } // end while
   }
